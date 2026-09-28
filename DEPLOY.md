@@ -43,22 +43,17 @@ docker compose logs -f      # 看三服务日志
 
 浏览器开 `http://<服务器>:8899/`。
 
-服务器**不能**联网装包时，二选一：
+服务器**不能**联网装包时：在能联网的机器上构建，再把镜像搬过去。
+注意**服务器架构**——x86 服务器在 Apple Silicon 上构建要加 `--platform linux/amd64`：
 
-- 从仓库 [Releases](https://github.com/studyingd/reTerminal-E1002-Doorplate/releases) 下预构建镜像
-  （`sensecraft-image-amd64.tar.gz`，linux/amd64，不含任何密钥）：
-  ```bash
-  curl -LO https://github.com/studyingd/reTerminal-E1002-Doorplate/releases/download/v1.0.0/sensecraft-image-amd64.tar.gz
-  docker load -i sensecraft-image-amd64.tar.gz && docker compose up -d
-  ```
-- 或自己在能联网的机器上构建（注意服务器架构，x86 服务器要加 `--platform linux/amd64`）：
-  ```bash
-  docker buildx build --platform linux/amd64 -t sensecraft:latest --load .
-  docker save sensecraft:latest | gzip > sensecraft-image-amd64.tar.gz   # 传过去 docker load -i
-  ```
+```bash
+docker buildx build --platform linux/amd64 -t sensecraft:latest --load .
+docker save sensecraft:latest | gzip > sensecraft-image.tar.gz   # scp 到服务器
+docker load -i sensecraft-image.tar.gz && docker compose up -d
+```
 
 镜像里**没有** `config.json`、`firmware/*.yaml`、`flasher/firmware/*.bin`（分别含飞书密钥与
-Wi-Fi 密码），全部由 `docker-compose.yml` 挂载宿主目录提供，所以镜像可以公开分发。
+Wi-Fi 密码），全部由 `docker-compose.yml` 挂载宿主目录提供，见 `.dockerignore`。
 
 ## 4. 飞书控制台要改一处
 
