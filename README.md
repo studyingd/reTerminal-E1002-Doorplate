@@ -131,7 +131,8 @@ docker compose build && docker compose up -d
 docker compose logs -f
 ```
 
-服务器部署、离线镜像搬运、迁移后重刷固件等完整步骤见 **[DEPLOY.md](DEPLOY.md)**。
+服务器部署、离线镜像（[Releases](https://github.com/studyingd/reTerminal-E1002-Doorplate/releases) 有预构建的 linux/amd64 镜像）、
+迁移后重刷固件等完整步骤见 **[DEPLOY.md](DEPLOY.md)**。
 
 ---
 
