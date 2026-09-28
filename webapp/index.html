@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>水墨屏门牌管理平台</title>
+<script type="module" src="/flash/vendor/install-button.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #f4f5f7; color: #1c1c1e; }
+  .container { max-width: 900px; margin: 0 auto; padding: 36px 20px; }
+  h1 { font-size: 24px; }
+  .subtitle { color: #666; font-size: 13px; margin: 6px 0 24px; }
+
+  .card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; }
+  .room-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .room-name { font-size: 18px; font-weight: 700; }
+  .tags { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .tag { font-size: 12px; padding: 3px 10px; border-radius: 999px; }
+  .tag.ok { background: #e5f7e9; color: #137a2d; }
+  .tag.warn { background: #fff3e0; color: #b25f00; }
+  .tag.busy { background: #111; color: #fff; }
+  .tag.free { background: #eee; color: #333; }
+  .meta { font-size: 12px; color: #999; margin-top: 6px; word-break: break-all; }
+  .bookings { margin-top: 12px; font-size: 14px; }
+  .booking { display: flex; justify-content: space-between; padding: 7px 10px; border-radius: 6px; margin-top: 6px; background: #f6f6f8; }
+  .booking.current { background: #111; color: #fff; font-weight: 700; }
+  .actions { margin-top: 14px; display: flex; gap: 10px; }
+  button, a.btn { background: #111; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; cursor: pointer; text-decoration: none; }
+  button.ghost { background: #eee; color: #333; }
+  button.danger { background: #fff; color: #c00; border: 1px solid #e0b4b4; }
+  button.flash { background: #111; width: 100%; }
+  .fw { margin-top: 14px; border-top: 1px dashed #ddd; padding-top: 12px; font-size: 13px; color: #666; }
+  /* 构建进度条 */
+  .progress { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+  .progress-bar { height: 100%; background: #111; width: 0%; transition: width 0.8s ease; }
+  .progress-text { font-size: 12px; color: #666; margin-top: 6px; display: flex; justify-content: space-between; }
+
+  /* 设备连接状态(心跳来自设备每 60s 的 .ver 轮询) */
+  .netline { margin-top: 10px; font-size: 13px; padding: 8px 10px; border-radius: 6px; }
+  .netline.on { background: #e5f7e9; color: #137a2d; }
+  .netline.off { background: #f6f6f8; color: #888; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot.on { background: #2da44e; }
+  .dot.off { background: #c8c8c8; }
+
+  /* 会议室切换标签 */
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .tab { padding: 8px 18px; border-radius: 999px; border: none; background: #fff; color: #1c1c1e;
+         box-shadow: 0 1px 3px rgba(0,0,0,.08); font-size: 14px; cursor: pointer; }
+  .tab.active { background: #111; color: #fff; }
+
+  .add-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; }
+  label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+  input { width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
+  select { width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; background: #fff; }
+  .msg { font-size: 13px; margin-top: 10px; }
+  .msg.err { color: #c00; }
+  .msg.ok { color: #137a2d; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div>
+    <h1>水墨屏门牌管理平台</h1>
+    <div class="subtitle">添加会议室、授权绑定、查看实时预约、构建烧录固件——全部在这里完成,无需终端</div>
+  </div>
+
+  <div class="card">
+    <b>添加会议室</b>
+    <div class="add-form" style="margin-top:12px">
+      <div>
+        <label>从飞书会议室目录选择</label>
+        <select id="addSelect" onchange="onPick()"><option value="">加载中…</option></select>
+      </div>
+      <div>
+        <label>墨水屏显示名称(自定义)</label>
+        <input id="addName" placeholder="如:10A · 会议室">
+      </div>
+      <button onclick="addRoom()">添加</button>
+    </div>
+    <div class="msg" id="addMsg"></div>
+  </div>
+
+  <div class="tabs" id="roomTabs"></div>
+  <div id="rooms"></div>
+</div>
+
+<script>
+let currentDevice = null;   // 当前展示的会议室(单卡片视图)
+let roomsCache = [];        // /api/rooms 最新数据,标签切换用它本地渲染
+
+async function load() {
+  const resp = await fetch("/api/rooms", { cache: "no-store" });
+  const data = await resp.json();
+  roomsCache = data.rooms;
+  window.__devices = new Set(roomsCache.map(r => r.device));
+  render();
+}
+
+function render() {
+  if (!roomsCache.some(r => r.device === currentDevice)) {
+    currentDevice = roomsCache.length ? roomsCache[0].device : null;
+  }
+  renderTabs(roomsCache);
+
+  const box = document.getElementById("rooms");
+  const r = roomsCache.find(x => x.device === currentDevice);
+  if (!r) {
+    box.innerHTML = '<div class="card" style="color:#888">还没有会议室,先在上方添加。</div>';
+    return;
+  }
+
+  const statusTag = r.live
+    ? (r.live.status === "busy"
+        ? '<span class="tag busy">已预定</span>'
+        : '<span class="tag free">空闲中</span>')
+    : '<span class="tag free">待刷新</span>';
+  const bindTag = r.bound
+    ? '<span class="tag ok">已绑定日历</span>'
+    : '<span class="tag warn">未绑定日历(预约人显示"已预约")</span>';
+
+  // ---- 设备连接状态:心跳 = 设备每 60s 拉一次 .ver ----
+  let netHtml = "";
+  if (r.net && r.net.online) {
+    netHtml = `<div class="netline on">● 设备在线 · IP ${r.net.ip} · 最近心跳 ${r.net.last_seen}</div>`;
+  } else if (r.net && r.net.last_seen) {
+    netHtml = `<div class="netline off">○ 设备离线 · 最后在线 ${r.net.last_seen}(${agoText(r.net.ago)})` +
+              (r.net.ip ? ` · 当时 IP ${r.net.ip}` : "") + `</div>`;
+  } else {
+    netHtml = `<div class="netline off">○ 设备尚未连接(从未检测到该门牌的拉图记录)</div>`;
+  }
+
+  let bookingsHtml = "";
+  if (r.live && r.live.bookings && r.live.bookings.length) {
+    bookingsHtml = '<div class="bookings">' + r.live.bookings.map(b =>
+      `<div class="booking${b[2] ? " current" : ""}"><span>${b[0]}</span><span>${b[1]}</span></div>`
+    ).join("") + "</div>";
+  } else if (r.live) {
+    bookingsHtml = '<div class="bookings muted" style="color:#999;font-size:13px">今日暂无预约</div>';
+  }
+
+  const bindBtn = r.bound ? "" :
+    `<a class="btn" href="/oauth/start?device=${r.device}">授权绑定日历</a>`;
+
+  // ---- 固件烧录区(本页内完成,不跳转) ----
+  let fwHtml = "";
+  const fw = r.firmware || {};
+  if (fw.state === "building") {
+    fwHtml = `
+      <div class="progress-text"><span class="pt-phase">${fw.phase || "构建中"}…</span><span class="pt-pct">${fw.pct || 0}%</span></div>
+      <div class="progress"><div class="progress-bar" style="width:${fw.pct || 0}%"></div></div>
+      <div style="font-size:12px;color:#999;margin-top:4px">首次约几分钟,完成后这里会出现烧录按钮</div>`;
+  } else if (fw.ready) {
+    fwHtml = `<esp-web-install-button manifest="${fw.manifest}">
+      <button class="flash" slot="activate">连接并烧录固件</button>
+      <span slot="unsupported">当前浏览器不支持串口烧录,请用 Chrome / Edge</span>
+      <span slot="not-allowed">烧录需 HTTPS 或 localhost/127.0.0.1 访问</span>
+    </esp-web-install-button>
+    <div style="margin-top:8px"><button class="ghost" onclick="buildFw('${r.device}')">重新构建固件</button>
+      <span style="color:#999;font-size:12px">(服务端固件逻辑有更新时,先重新构建、再烧录)</span></div>`;
+  } else if (fw.state && fw.state.startsWith("error")) {
+    fwHtml = `构建失败:${fw.state} <button class="ghost" onclick="buildFw('${r.device}')">重试构建</button>`;
+  } else {
+    fwHtml = `<button class="ghost" onclick="buildFw('${r.device}')">构建固件</button>
+      <span style="color:#999;font-size:12px">(首次烧录前需要构建,约几分钟;之后可反复烧录)</span>`;
+  }
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <div class="room-head">
+      <div class="room-name">${r.room_name}</div>
+      <div class="tags">${statusTag}${bindTag}</div>
+    </div>
+    <div class="meta">设备 ${r.device} · ${r.room_id}${r.calendar_id ? " · " + r.calendar_id : ""}</div>
+    ${netHtml}
+    ${bookingsHtml}
+    <div class="actions">
+      ${bindBtn}
+      <button class="danger" onclick="delRoom('${r.device}','${r.room_name}')">删除</button>
+    </div>
+    <div class="fw" id="fw-${r.device}" data-fwstate="${fw.state}">${fwHtml}</div>`;
+  box.innerHTML = "";
+  box.appendChild(card);
+}
+
+function renderTabs(rooms) {
+  const tabs = document.getElementById("roomTabs");
+  tabs.innerHTML = "";
+  rooms.forEach(r => {
+    const b = document.createElement("button");
+    b.className = "tab" + (r.device === currentDevice ? " active" : "");
+    const online = r.net && r.net.online;
+    b.innerHTML = `<span class="dot ${online ? "on" : "off"}"></span>${r.room_name}`;
+    b.title = online ? `设备在线 · ${r.net.ip}` : "设备离线/未连接";
+    b.onclick = () => { currentDevice = r.device; render(); load(); };  // 立即切换,顺便拉最新心跳
+    tabs.appendChild(b);
+  });
+}
+
+function agoText(sec) {
+  if (sec == null) return "";
+  if (sec < 90) return "刚刚";
+  if (sec < 3600) return Math.floor(sec / 60) + " 分钟前";
+  if (sec < 86400) return Math.floor(sec / 3600) + " 小时前";
+  return Math.floor(sec / 86400) + " 天前";
+}
+
+async function loadDirectory() {
+  const sel = document.getElementById("addSelect");
+  try {
+    const resp = await fetch("/api/room_directory", { cache: "no-store" });
+    const data = await resp.json();
+    if (!data.ok) { sel.innerHTML = `<option value="">目录加载失败:${data.error}</option>`; return; }
+    sel.innerHTML = '<option value="">请选择会议室…</option>';
+    for (const r of data.rooms) {
+      if (r.disabled) continue;
+      const opt = document.createElement("option");
+      opt.value = r.room_id;
+      opt.dataset.name = r.name;
+      opt.textContent = `${r.building} ${r.floor} · ${r.name}(${r.capacity}人)` + (r.added ? " ✓已添加" : "");
+      opt.disabled = !!r.added;
+      sel.appendChild(opt);
+    }
+  } catch (e) {
+    sel.innerHTML = "<option value=''>目录加载失败</option>";
+  }
+}
+
+function onPick() {
+  const sel = document.getElementById("addSelect");
+  const name = sel.selectedOptions[0]?.dataset.name || "";
+  document.getElementById("addName").value = name;   // 预填飞书名,用户可自定义修改
+}
+
+async function addRoom() {
+  const sel = document.getElementById("addSelect");
+  const roomId = sel.value;
+  const name = document.getElementById("addName").value.trim();
+  const msg = document.getElementById("addMsg");
+  if (!roomId) { msg.className = "msg err"; msg.textContent = "请先从目录中选择会议室"; return; }
+  if (!name) { msg.className = "msg err"; msg.textContent = "请填写墨水屏显示名称"; return; }
+  msg.className = "msg"; msg.textContent = "校验中(调用飞书接口验证 room_id)...";
+  const resp = await fetch("/api/rooms", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ room_name: name, room_id: roomId }),
+  });
+  const data = await resp.json();
+  if (data.ok) {
+    currentDevice = data.device;   // 跳到新添加的会议室
+    msg.className = "msg ok";
+    msg.textContent = data.firmware_ready
+      ? `已添加为 ${data.device}。会议室号 ${data.label} 的固件之前已构建过,可直接烧录,无需重新构建。`
+      : `已添加为 ${data.device}。该会议室固件尚未构建,请在卡片中点击「构建固件」。`;
+    if (data.binding_restored) msg.textContent += " 日历绑定已自动恢复,无需重新授权。";
+    loadDirectory();
+    load();
+  } else {
+    msg.className = "msg err";
+    msg.textContent = data.error;
+  }
+}
+
+async function delRoom(device, name) {
+  if (!confirm(`确定删除「${name}」吗?`)) return;
+  await fetch("/api/rooms/" + device, { method: "DELETE" });
+  load();           // 刷新卡片区
+  loadDirectory();  // 刷新添加下拉框,去掉被删房间的"✓已添加"标记
+}
+
+async function buildFw(device) {
+  await fetch("/api/build/" + device, { method: "POST" });
+  // 构建进度由 SSE 实时推送,无需手动加快刷新
+}
+
+// 预约信息仍轮询(30 秒);构建进度改由 SSE 推送
+let pollTimer = null;
+function scheduleLoad(delay) {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    // 烧录弹窗打开时(esp-web-tools 的 ewt-install-dialog)暂停刷新,避免打断烧录
+    if (!document.querySelector("ewt-install-dialog")) {
+      await load();
+    }
+    scheduleLoad(30000);
+  }, delay);
+}
+
+// ---- SSE 实时构建进度:服务端推送状态,页面不刷新,进度条原地更新 ----
+const es = new EventSource("/api/build_events");
+es.onmessage = (e) => {
+  const builds = JSON.parse(e.data);
+  let needReload = false;
+  for (const [dev, b] of Object.entries(builds)) {
+    const box = document.getElementById("fw-" + dev);
+    if (!box) {
+      if (dev === currentDevice) needReload = true;  // 当前卡片还没渲染
+      continue;                                      // 非当前展示的会议室,切换标签时自然会拉新
+    }
+    if (b.state !== box.dataset.fwstate) {
+      box.dataset.fwstate = b.state;   // 先改标记,防止重绘前重复触发
+      needReload = true;               // 状态切换(按钮↔进度条↔重试)才重绘卡片
+    } else if (b.state === "building") {
+      box.querySelector(".progress-bar").style.width = (b.pct || 0) + "%";
+      box.querySelector(".pt-phase").textContent = (b.phase || "构建中") + "…";
+      box.querySelector(".pt-pct").textContent = (b.pct || 0) + "%";
+    }
+  }
+  if (needReload) load();
+};
+
+load();
+loadDirectory();
+scheduleLoad(30000);
+</script>
+</body>
+</html>

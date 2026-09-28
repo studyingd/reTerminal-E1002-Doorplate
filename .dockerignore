@@ -1,0 +1,17 @@
+logs/
+out/
+__pycache__/
+*.log
+*.tar
+*.tar.gz
+config.json
+firmware/.esphome/
+# 生成物:factory.bin 内含 Wi-Fi 密码与内网地址,不进镜像
+# (运行时由 docker-compose 挂载 ./flasher 提供)
+flasher/firmware/
+flasher/manifests/
+flasher/devices.json
+.git/
+.gitignore
+.claude/
+.DS_Store

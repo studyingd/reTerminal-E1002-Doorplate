@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>会议室状态牌</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 800px; height: 480px; background: #ffffff; color: #000000;
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+    overflow: hidden;
+  }
+  .main { display: flex; height: 480px; padding: 24px 32px; }
+
+  /* 左栏:会议室号 + 日期温度区(字体深青 RGB 0,58,74) */
+  .left { width: 388px; border-right: 1px solid #000; padding-top: 16px; color: #003A4A; }
+  .room-number {
+    font-size: 150px; font-weight: 700; line-height: 1.1;
+    color: #003A4A;
+    padding: 0 16px; margin-right: 24px;
+  }
+  .info-block { border-top: 1px solid #000; margin-top: 26px; margin-right: 24px; padding-top: 18px; }
+  .date { font-size: 28px; }
+  .temp-label { font-size: 24px; margin-top: 10px; }
+  .temp-value { font-size: 68px; font-weight: 700; line-height: 1.1; }
+  .temp-unit { font-size: 30px; font-weight: 400; margin-left: 8px; }
+  .weather { font-size: 30px; margin-left: 16px; }
+  /* 天气图标:72px 盒、下移 13px —— 图标视觉底边贴住温度数字基线,
+     视觉高度(~55px)比 68px 字号的数字字面(~49px)略高一点,与温度对称对齐;
+     行高由文字决定,图标不再把整行撑大 */
+  .weather svg { width: 72px; height: 72px; vertical-align: -13px; }
+
+  /* 右栏:正在使用 + 预约信息 两个模块(字体深青 RGB 0,58,74) */
+  .right { flex: 1; padding-left: 24px; }
+  /* 上区固定 207px(= 左栏门牌号区高度),"预约信息"标题用 margin-top:auto 压底,
+     使其分割线(border-bottom)与左栏门牌号下的分割线严格同高对齐 */
+  .right-top { height: 207px; display: flex; flex-direction: column; }
+  .module-title {
+    font-size: 26px; font-weight: 700; color: #003A4A;
+    border-bottom: 1px solid #003A4A; padding-bottom: 8px;
+    margin-top: 24px;
+  }
+  .module-title.first { margin-top: 10px; }
+  .module-title.bookings-title { margin-top: auto; }
+  /* 正在使用:白底深青字深青框(深青字在黑底上看不清,故反白) */
+  .current-box {
+    margin-top: 14px; height: 66px; padding: 0 8px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 24px;
+  }
+  .current-box.busy { background: #fff; color: #003A4A; font-weight: 700; border: 2px solid #003A4A; }
+  /* 空闲:标题隐藏,整个模块区绿底(RGB 143,195,31)白字,文字居中放大 */
+  .current-box.free {
+    background: #8FC31F; color: #ffffff; height: 118px; margin-top: 10px;
+    justify-content: center; font-size: 36px; font-weight: 700;
+  }
+  .booking-row {
+    display: flex; justify-content: space-between; color: #003A4A;
+    font-size: 22px; margin-top: 14px; padding: 2px 8px;
+    margin-left: -8px; margin-right: -8px;
+  }
+  .empty { font-size: 22px; color: #003A4A; margin-top: 14px; }
+</style>
+</head>
+<body>
+  <div class="main">
+    <div class="left">
+      <div class="room-number" id="roomNumber">--</div>
+      <div class="info-block">
+        <div class="date" id="date">--</div>
+        <div class="temp-label">今日温度</div>
+        <div><span class="temp-value" id="temp">--</span><span class="temp-unit">°C</span><span class="weather" id="weather"></span></div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="right-top">
+        <div class="module-title first" id="currentTitle">正在使用</div>
+        <div class="current-box free" id="currentBox">当前空闲</div>
+        <div class="module-title bookings-title">预约信息</div>
+      </div>
+      <div id="rows"></div>
+    </div>
+  </div>
+
+<script>
+/* ===== 由 bridge.py 生成时替换的占位符 ===== */
+const ROOM_KEY = "{{ROOM_KEY}}";           // 该屏对应的会议室 key,如 "screen-1"
+const DATA_URL = "{{DATA_URL}}";           // 外部 JSON 地址(可为空字符串,空则只用烤入数据)
+const FALLBACK = {{FALLBACK_JSON}};        // 生成时烤入的最新数据(保底,无网/禁外联时也能显示)
+
+/* ===== 天气图标(weather.py 的 WMO 短文案 -> 线性 SVG,stroke 继承深青色) ===== */
+function wicon(inner) {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+         'stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+}
+/* 缩小版云(降水类图标共用的上半部分) */
+const CLOUD_S = '<path transform="translate(1.4 -1.5) scale(0.85)" vector-effect="non-scaling-stroke" ' +
+                'd="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>';
+/* 六瓣雪花 */
+function flake(x, y) {
+  return '<path d="M' + x + ' ' + (y - 2.2) + 'v4.4M' + (x - 1.9) + ' ' + (y - 1.1) +
+         'l3.8 2.2M' + (x + 1.9) + ' ' + (y - 1.1) + 'l-3.8 2.2"/>';
+}
+const WEATHER_ICONS = {
+  "晴":   wicon('<circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M19.4 4.6l-1.8 1.8M6.4 17.6l-1.8 1.8"/>'),
+  "多云": wicon('<circle cx="6" cy="6" r="2.6"/>' +
+                '<path d="M6 1.4v1.6M1.4 6H3M2.7 2.7l1.2 1.2M9.3 2.7L8.1 3.9"/>' +
+                '<path transform="translate(4.5 4.5) scale(0.75)" vector-effect="non-scaling-stroke" ' +
+                'd="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>'),
+  "阴":   wicon('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>'),
+  "雾":   wicon(CLOUD_S + '<path d="M5 18.5h14M7.5 21.5h9"/>'),
+  "毛毛雨": wicon(CLOUD_S + '<path d="M8 18.5v1.8M12 20v1.8M16 18.5v1.8"/>'),
+  "冻雨": wicon(CLOUD_S + '<path d="M8 18.5v3M16 18.5v3"/>' + flake(12, 19.8)),
+  "小雨": wicon(CLOUD_S + '<path d="M9 18.5v3M14.5 18.5v3"/>'),
+  "中雨": wicon(CLOUD_S + '<path d="M8 18.5v3M12 19.5v3M16 18.5v3"/>'),
+  "大雨": wicon(CLOUD_S + '<path d="M7.5 18v3.5M11 19v3.5M14.5 18v3.5M18 19v3.5"/>'),
+  "阵雨": wicon(CLOUD_S + '<path d="M8 18.5v3M12 19.5v3M16 18.5v3"/>'),
+  "暴雨": wicon(CLOUD_S + '<path d="M6.5 18v4M9.5 19.5v4M12.5 18v4M15.5 19.5v4M18.5 18v4"/>'),
+  "小雪": wicon(CLOUD_S + flake(12, 19.5)),
+  "中雪": wicon(CLOUD_S + flake(9.5, 19.5) + flake(14.5, 19.5)),
+  "大雪": wicon(CLOUD_S + flake(8, 19.5) + flake(12, 19.5) + flake(16, 19.5)),
+  "雪":   wicon(CLOUD_S + flake(12, 19.5)),
+  "阵雪": wicon(CLOUD_S + flake(9.5, 19.5) + flake(14.5, 19.5)),
+  "雷暴": wicon(CLOUD_S + '<path d="M13 14.5l-3.5 4.5h4.5L10.5 23"/>'),
+  "冰雹": wicon(CLOUD_S + '<circle cx="8.5" cy="19" r="1.1"/><circle cx="12.5" cy="20.5" r="1.1"/><circle cx="16" cy="19" r="1.1"/>'),
+};
+
+function renderRoom(d) {
+  if (!d) return;
+  document.getElementById("roomNumber").textContent = d.label || d.name;
+  document.getElementById("date").textContent = d.date;
+  document.getElementById("temp").textContent = d.temperature;
+  /* 天气:有图标就只显示图标;未收录的文案退回文字 */
+  const wEl = document.getElementById("weather");
+  const wIcon = WEATHER_ICONS[d.weather || ""];
+  if (wIcon) { wEl.innerHTML = wIcon; } else { wEl.textContent = d.weather || ""; }
+
+  const list = d.bookings || [];
+  const current = list.find(b => b[2]);           // b[2]=是否当前进行中
+  const upcoming = list.filter(b => !b[2]);       // 上游已过滤掉已结束的场次
+
+  // 模块一:正在使用(空闲时隐藏标题,大框居中显示)
+  const box = document.getElementById("currentBox");
+  document.getElementById("currentTitle").style.display = current ? "" : "none";
+  box.innerHTML = "";
+  if (current) {
+    box.className = "current-box busy";
+    const spanT = document.createElement("span");
+    spanT.textContent = current[0];
+    const spanW = document.createElement("span");
+    spanW.textContent = current[1];
+    box.appendChild(spanT);
+    box.appendChild(spanW);
+  } else {
+    box.className = "current-box free";
+    box.textContent = "当前空闲";
+  }
+
+  // 模块二:预约信息(接下来的场次)
+  const rows = document.getElementById("rows");
+  rows.innerHTML = "";
+  const rest = upcoming.slice(0, 5);
+  if (rest.length === 0) {
+    rows.innerHTML = '<div class="empty">今日暂无更多预约</div>';
+  } else {
+    for (const b of rest) {
+      const div = document.createElement("div");
+      div.className = "booking-row";
+      const spanT = document.createElement("span");
+      spanT.textContent = b[0];
+      const spanW = document.createElement("span");
+      spanW.textContent = b[1];
+      div.appendChild(spanT);
+      div.appendChild(spanW);
+      rows.appendChild(div);
+    }
+  }
+}
+
+/* 优先拉外部 JSON(新鲜数据);失败则用烤入的 FALLBACK */
+if (DATA_URL) {
+  fetch(DATA_URL, { cache: "no-store" })
+    .then(r => r.json())
+    .then(all => renderRoom((all.rooms || {})[ROOM_KEY] || FALLBACK))
+    .catch(() => renderRoom(FALLBACK));
+} else {
+  renderRoom(FALLBACK);
+}
+</script>
+</body>
+</html>

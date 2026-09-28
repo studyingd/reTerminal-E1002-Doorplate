@@ -1,0 +1,18 @@
+services:
+  sensecraft:
+    image: sensecraft:latest
+    restart: unless-stopped
+    ports:
+      - "8899:8899"   # 管理平台
+      - "8000:8000"   # 墨水屏拉图服务
+    volumes:
+      # 含飞书密钥,不进镜像;首次部署从本地 config.json 上传并改 image_base 为服务器地址
+      - ./config.json:/app/config.json
+      # 固件/manifest/烧录静态资源;服务器上构建的固件也落在这里
+      - ./flasher:/app/flasher
+      # YAML 与 esphome 构建缓存
+      - ./firmware:/app/firmware
+      # ESPHome 工具链缓存,重建容器不重复下载
+      - esphome-cache:/root
+volumes:
+  esphome-cache:

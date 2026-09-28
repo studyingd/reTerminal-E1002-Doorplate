@@ -1,0 +1,33 @@
+# ---- 密钥与本机配置(用 config.example.json 做模板,真实配置不入库) ----
+config.json
+token.json
+code.txt
+*.pem
+*.key
+.last_temp
+
+# ---- 生成产物:固件 YAML / factory.bin 内含 Wi-Fi 密码与内网拉图地址,不入库 ----
+# 由 flasher/build_firmware.py 从 config.json 重新生成
+firmware/*.yaml
+flasher/firmware/
+flasher/devices.json
+flasher/manifests/
+
+# ---- 构建缓存与运行产物 ----
+firmware/.esphome/
+firmware/secrets.yaml
+out/
+logs/
+__pycache__/
+*.pyc
+*.log
+
+# ---- 大文件:GitHub 单文件上限 100MB(该镜像 109MB),用 docker save/load 传递 ----
+*.tar.gz
+*.tar
+
+# ---- 工具/编辑器 ----
+.claude/
+.DS_Store
+.idea/
+.vscode/
